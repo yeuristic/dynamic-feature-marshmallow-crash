@@ -1,0 +1,59 @@
+if [ ! -d "${ANDROID_HOME}" ]; then
+    if [ -d "${ANDROID_SDK}" ]; then
+        ANDROID_HOME="${ANDROID_SDK}"
+    else
+        echo "Error: Android SDK not found"
+        exit 1
+    fi
+fi
+
+if ! command -v "apkanalyzer" &> /dev/null; then
+    if [ -f "${ANDROID_HOME}/tools/bin/apkanalyzer" ]; then
+        PATH="${PATH}:${ANDROID_HOME}/tools/bin"
+    else
+        echo "Error: apkanalyzer not found"
+        exit 1
+    fi
+fi
+
+
+buildCommand=$1
+buildCommandLower=$(tr '[:upper:]' '[:lower:]' <<< $buildCommand)
+app=$(sed -En 's/(.*):bundle.*/\1/p' <<< $buildCommandLower)
+variant=$(sed -En 's/.*:bundle(.*)/\1/p' <<< $buildCommandLower)
+customVariant=$(sed -En 's/(.*)(debug|staging|release)/\1/p' <<< $variant)
+typeVariant=$(sed -En 's/.*(debug|staging|release)/\1/p' <<< $variant)
+capitalizedTypeVariant="$(tr '[:lower:]' '[:upper:]' <<< ${typeVariant:0:1})${typeVariant:1}"
+appBundle=$app/build/outputs/bundle/${customVariant:+$customVariant}$capitalizedTypeVariant/$app${customVariant:+-$customVariant}-$typeVariant.aab
+tmpDir=$app/build/install
+deviceApks=$tmpDir/device.apks
+appApks=$tmpDir/app.apks
+
+echo "* Build bundle: $appBundle"
+./gradlew $buildCommand -PfakeDFM=true
+
+echo "* Clean temporary dir: $tmpDir"
+rm -rf "$tmpDir"
+
+echo "* Build specific apks for connected device: $deviceApks"
+java -jar bundletool.jar build-apks --bundle="$appBundle" --output="$deviceApks" --connected-device
+
+echo "* Install specific apks for connected device: $deviceApks"
+java -jar bundletool.jar install-apks --apks="$deviceApks"
+
+echo "* Build complete apks: $appApks"
+java -jar bundletool.jar build-apks --bundle="$appBundle" --output="$appApks"
+unzip "$tmpDir/app.apks" -d "$tmpDir/apks"
+
+package=$(apkanalyzer manifest application-id "$tmpDir/apks/splits/base-master.apk")
+apksDir=/sdcard/Android/data/$package/files/splits
+
+echo "* Clean apks: $apksDir"
+adb shell rm -rf "$apksDir"
+
+echo "* Push complete apks: $apksDir"
+adb push "$tmpDir/apks/splits" "$apksDir"
+
+echo "* Launch application: $package"
+activity=$(adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $package | tail -1)
+adb shell cmd activity start-activity $activity

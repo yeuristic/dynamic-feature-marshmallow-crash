@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Dynamic Feature Marshmallow Crash</string>
+    <string name="title_dynamicfeature">Dynamic Feature</string>
+    <string name="navigate_to_dfm">Navigate To Dynamic Main Activity</string>
+</resources>
